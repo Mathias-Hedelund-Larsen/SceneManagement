@@ -1,0 +1,3 @@
+[submodule "GitSubmodules/FlaggedEnumDrawer"]
+	path = GitSubmodules/FlaggedEnumDrawer
+	url = https://github.com/Mathias-Hedelund-Larsen/FlaggedEnumDrawer.git

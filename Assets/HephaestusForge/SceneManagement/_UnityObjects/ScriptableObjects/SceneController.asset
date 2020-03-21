@@ -12,3 +12,5 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8ac8508fe24d83a4c98e3d4666a97ca2, type: 3}
   m_Name: SceneController
   m_EditorClassIdentifier: 
+  _activeScenes: 0
+  _currentlyLoading: 0

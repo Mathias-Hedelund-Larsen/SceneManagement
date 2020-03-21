@@ -2,6 +2,7 @@
 using System.Linq;
 using UnityEngine;
 using System.Collections.Generic;
+using HephaestusForge.FlaggedEnum;
 
 namespace HephaestusForge.SceneManagement
 {
@@ -12,32 +13,36 @@ namespace HephaestusForge.SceneManagement
     public sealed class SceneController : ScriptableObject
     {
         //The scenes that are currently loading
-        [NonSerialized]
-        private List<SceneID> _currentlyLoading = new List<SceneID>();
+        [SerializeField]
+        private Scenes _activeScenes;
 
-        //The currently active scenes
-        [NonSerialized]
-        private Dictionary<SceneID, UnityEngine.SceneManagement.Scene> _activeScenes = new Dictionary<SceneID, UnityEngine.SceneManagement.Scene>();
+        [SerializeField]
+        private Scenes _currentlyLoading;
 
         //Invoked when any scene is loaded
-
-        public event Action<SceneID> _OnAnySceneLoaded;
+        public event Action<Scenes> _OnAnySceneLoaded;
 
         //Invoked when any scene is unloaded
-        public event Action<SceneID> _OnAnySceneUnloaded;
+        public event Action<Scenes> _OnAnySceneUnloaded;
 
         //Invoked before any scene is loaded
-        public event Action<SceneID> _BeforeAnySceneLoaded;
+        public event Action<Scenes> _BeforeAnySceneLoaded;
 
         //Invoked before any scene is unloaded
-        public event Action<SceneID> _BeforeAnySceneUnloaded;
+        public event Action<Scenes> _BeforeAnySceneUnloaded;
 
         public float LoadingProcess { get; private set; }
 
-        /// <summary>
-        /// Getting the ids of the active scenes
-        /// </summary>
-        public List<SceneID> GetActiveScenes { get { return _activeScenes.Keys.ToList(); } }
+        ///// <summary>
+        ///// Getting the ids of the active scenes
+        ///// </summary>
+        public Scenes[] GetActiveScenes { get { return _activeScenes.ContainedValues().ToArray(); } }
+
+        private void Init()
+        {
+            _currentlyLoading = 0;
+            _activeScenes = (Scenes)(1 << UnityEngine.SceneManagement.SceneManager.GetActiveScene().buildIndex);
+        }
 
         /// <summary>
         /// Called by unity event
@@ -45,7 +50,7 @@ namespace HephaestusForge.SceneManagement
         /// <param name="sceneID"></param>
         private void LoadSceneSingle(int sceneID)
         {
-            LoadSceneSingle((SceneID)sceneID);
+            LoadSceneSingle((Scenes)sceneID);
         }
 
         /// <summary>
@@ -54,27 +59,35 @@ namespace HephaestusForge.SceneManagement
         /// <param name="sceneID"></param>
         private void LoadSceneAdditive(int sceneID)
         {
-            LoadSceneAdditive((SceneID)sceneID);
+            LoadSceneAdditive((Scenes)sceneID);
+        }
+
+        public bool IsSceneActive(Scenes scene)
+        {
+            return _activeScenes.HasFlag(scene);
+        }
+
+        public bool IsSceneBeingLoaded(Scenes scene)
+        {
+            return _currentlyLoading.HasFlag(scene);
         }
 
         /// <summary>
         /// Load a scene with the single mode, will unload all other scenes automatically (Except DontDestroyOnLoad)
         /// </summary>
         /// <param name="scene"></param>
-        public void LoadSceneSingle(SceneID scene)
+        public void LoadSceneSingle(Scenes scene)
         {
-            if (!_activeScenes.ContainsKey(scene) && !_currentlyLoading.Contains(scene))
+            if (!_activeScenes.HasFlag(scene) && !_currentlyLoading.HasFlag(scene))
             {
-                _currentlyLoading.Add(scene);
-                _BeforeAnySceneLoaded?.Invoke(scene);
-
                 if (_BeforeAnySceneUnloaded != null)
                 {
-                    foreach (var pair in _activeScenes)
-                    {
-                        _BeforeAnySceneUnloaded.Invoke(pair.Key);
-                    }
+                    _activeScenes.ForEachContained(s => _BeforeAnySceneUnloaded.Invoke(s));
                 }
+
+                _currentlyLoading |= scene;
+
+                _BeforeAnySceneLoaded?.Invoke(scene);                
 
                 LoadSceneAsync(scene, UnityEngine.SceneManagement.LoadSceneMode.Single);
             }
@@ -84,11 +97,11 @@ namespace HephaestusForge.SceneManagement
         /// Load a new scene without unloading other scenes, only if isn't already active will it be loaded
         /// </summary>
         /// <param name="scene">The id of the scene to be loaded</param>
-        public void LoadSceneAdditive(SceneID scene)
+        public void LoadSceneAdditive(Scenes scene)
         {
-            if (!_activeScenes.ContainsKey(scene) && !_currentlyLoading.Contains(scene))
+            if (!_activeScenes.HasFlag(scene) && !_currentlyLoading.HasFlag(scene))
             {
-                _currentlyLoading.Add(scene);
+                _currentlyLoading |= scene;
                 _BeforeAnySceneLoaded?.Invoke(scene);
 
                 LoadSceneAsync(scene, UnityEngine.SceneManagement.LoadSceneMode.Additive);
@@ -99,9 +112,9 @@ namespace HephaestusForge.SceneManagement
         /// Unload an active scene, will only work when multiple scenes are active
         /// </summary>
         /// <param name="scene">The scene to be unloaded</param>
-        public void UnloadScene(SceneID scene)
+        public void UnloadScene(Scenes scene)
         {
-            if (_activeScenes.ContainsKey(scene))
+            if (_activeScenes.HasFlag(scene))
             {
                 _BeforeAnySceneUnloaded?.Invoke(scene);
 
@@ -112,35 +125,23 @@ namespace HephaestusForge.SceneManagement
         /// <summary>
         /// The coroutine for loading a scene async
         /// </summary>
-        /// <param name="id">The id of the scene</param>
+        /// <param name="scene">The id of the scene</param>
         /// <param name="loadSceneMode">How the scene should be loaded</param>
         /// <returns></returns>
-        private void LoadSceneAsync(SceneID id, UnityEngine.SceneManagement.LoadSceneMode loadSceneMode)
+        private void LoadSceneAsync(Scenes scene, UnityEngine.SceneManagement.LoadSceneMode loadSceneMode)
         {
-            UnityEngine.SceneManagement.SceneManager.LoadSceneAsync((int)id, loadSceneMode).completed += (obj) =>
+            UnityEngine.SceneManagement.SceneManager.LoadSceneAsync(scene.GetEnumValueIndex(), loadSceneMode).completed += (obj) =>
             {
                 if (loadSceneMode == UnityEngine.SceneManagement.LoadSceneMode.Single && _OnAnySceneUnloaded != null)
                 {
-                    foreach (var pair in _activeScenes)
-                    {
-                        _OnAnySceneUnloaded.Invoke(pair.Key);
-                    }
+                    _activeScenes.ForEachContained(s => _OnAnySceneUnloaded.Invoke(s));
 
-                    _activeScenes.Clear();
+                    _activeScenes = scene;
                 }
+                
+                _currentlyLoading &= ~scene;
 
-                for (int i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++)
-                {
-                    if (UnityEngine.SceneManagement.SceneManager.GetSceneAt(i).buildIndex == (int)id)
-                    {
-                        _activeScenes.Add(id, UnityEngine.SceneManagement.SceneManager.GetSceneAt(i));
-                    }
-                }
-
-                    //UnityEditor.EditorBuildSettings.sce
-                    _currentlyLoading.Remove(id);
-
-                _OnAnySceneLoaded?.Invoke(id);
+                _OnAnySceneLoaded?.Invoke(scene);
             };
         }
 
@@ -149,11 +150,11 @@ namespace HephaestusForge.SceneManagement
         /// </summary>
         /// <param name="id">The id of the scene</param>
         /// <returns></returns>
-        private void UnloadSceneAsync(SceneID id)
+        private void UnloadSceneAsync(Scenes id)
         {
-            UnityEngine.SceneManagement.SceneManager.UnloadSceneAsync((int)id).completed += (obj) =>
+            UnityEngine.SceneManagement.SceneManager.UnloadSceneAsync(id.GetEnumValueIndex()).completed += (obj) =>
             {
-                _activeScenes.Remove(id);
+                _activeScenes &= ~id;
 
                 _OnAnySceneUnloaded?.Invoke(id);
             };
